@@ -12,9 +12,14 @@ exports.update_ddns = (req, res) => {
   const ZT_AUTH = req_body.zt_auth || process.env.ZT_AUTH;
   const ZT_NETWORKID = req_body.zt_networkid || process.env.ZT_NETWORKID;
   const ZT_MEMBERID = req_body.zt_memberid || process.env.ZT_MEMBERID;
-  const GD_USERNAME = req_body.gd_username || process.env.GD_USERNAME;
-  const GD_PASSWORD = req_body.gd_password || process.env.GD_PASSWORD;
-  const GD_HOSTNAME = req_body.gd_hostname || process.env.GD_HOSTNAME;
+  let GD_HOSTNAMES = req_body.gd_hostnames || process.env.GD_HOSTNAMES;
+  let GD_USERNAMES = req_body.gd_usernames || process.env.GD_USERNAMES;
+  let GD_PASSWORDS = req_body.gd_passwords || process.env.GD_PASSWORDS;
+  if (!Array.isArray(GD_HOSTNAMES)) {
+    GD_HOSTNAMES = [GD_HOSTNAMES];
+    GD_USERNAMES = [GD_USERNAMES];
+    GD_PASSWORDS = [GD_PASSWORDS];
+  }
   
   // ZeroTier Request for Static Member Info
   console.log("Getting IP address...");
@@ -24,7 +29,6 @@ exports.update_ddns = (req, res) => {
     headers: {Authorization : `Bearer ${ZT_AUTH}`}}
   )
   .then(zt_res => {
-    console.log(zt_res);
 
   // Extract IP address
     var zt_memberIP = zt_res.data.physicalAddress;
@@ -35,27 +39,35 @@ exports.update_ddns = (req, res) => {
 
     // Update DDNS
     console.log("Updating DDNS...");
-    var gd_url = `https://${GD_USERNAME}:${GD_PASSWORD}@domains.google.com/nic/update`;
-    // Google Domain Request to Update DDNS
-    axios
-    .get(gd_url, {
-      params: {
-        hostname: GD_HOSTNAME,
-        myip: zt_memberIP
-      }
-    })
-    .then(gd_res => {
-      console.log(gd_res);
-      return res.status(200).send("Successfully set DDNS.");
-    })
-    .catch(error => {
-      console.error(error);
-      return res.status(500).send("Couldn't set DDNS.");
+    // Google Domain Request to Update DDNS for all domains
+    let promises = [];
+    for (let i = 0; i < GD_HOSTNAMES.length; i++) {
+      const gd_url = `https://${GD_USERNAMES[i]}:${GD_PASSWORDS[i]}@domains.google.com/nic/update`;
+      const gd_hostname = GD_HOSTNAMES[i];
+      promises.push(
+        axios
+        .get(gd_url, {
+          params: {
+            hostname: gd_hostname,
+            myip: zt_memberIP
+          }
+        })
+        .then(gd_res => {
+          if(gd_res.data != "badauth") {
+            return `${gd_hostname}: Success.`;
+          } else return `${gd_hostname}: Fail (Bad Auth)`;
+        })
+        .catch(error => {
+          console.error(error);
+          return `${gd_hostname}: Fail (${error})`;
+        })
+      );
+    };
+    
+    let responses = Promise.all(promises)
+    .then((responses) => {
+      console.log(responses);
+      res.status(200).send(responses)
     });
-  })
-  .catch(error => {
-    console.error(error);
-    return res.status(500).send("Couldn't retrieve ZT members.");
-  });
 
-};
+})};
